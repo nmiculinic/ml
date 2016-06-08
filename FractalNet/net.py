@@ -22,19 +22,16 @@ class FractalNet():
                     stddev=0.35
                 ), name="filter")
 
-                self.bias = tf.Variable(
-                    [0] * out_chanell, dtype=tf.float32, name="bias")
+                self.bias = tf.Variable([0] * out_chanell, dtype=tf.float32, name="bias")
                 atom = tf.nn.conv2d(input, self.filter, [1, 1, 1, 1], 'SAME')
                 atom = tf.nn.relu(tf.nn.bias_add(atom, self.bias))
                 atom = batch_normalization(atom)
 
             self.__tensors = [atom]
             if n > 1:
-                Fp = FractalNet(input, n - 1, f_height, f_width,
-                                int((out_chanell + in_channel) / 2))
+                Fp = FractalNet(input, n - 1, f_height, f_width, int((out_chanell + in_channel) / 2))
                 self.children.append(Fp)
-                Fp = FractalNet(Fp.get_tensor(), n - 1,
-                                f_height, f_width, out_chanell)
+                Fp = FractalNet(Fp.get_tensor(), n - 1, f_height, f_width, out_chanell)
                 self.children.append(Fp)
                 self.__tensors.extend(Fp.__tensors)
 
@@ -47,8 +44,7 @@ class FractalNet():
                 ]
 
                 self.__tensor = tf.add_n(
-                    [tf.mul(m, x)
-                     for m, x in zip(self.is_active, self.__tensors)],
+                    [tf.mul(m, x) for m, x in zip(self.is_active, self.__tensors)],
                     name="Average_pool_join"
                 )
 
@@ -78,8 +74,7 @@ class FractalNet():
     def genLocalDropPath(self, dropout_prob):
         values = np.zeros(self.n)
         while np.sum(values) < 0.5:  # ==0; floating point correction
-            values = (np.random.random(self.n) >
-                      dropout_prob).astype(np.float32)
+            values = (np.random.random(self.n) > dropout_prob).astype(np.float32)
         values /= np.sum(values)  # normalize sum to 1
         return tf.group(
             self.genAssignJoinValues(values),

@@ -9,19 +9,38 @@ import tflearn
 from net import FractalNet
 
 batch_size = 50
-logdir = os.path.expanduser("~/logs/")
-test_log_steps = 10
-reduce_learning = [100, 150, 175, 185]
+logdir = os.path.expanduser("~/logs/mini")
+reduce_learning = [10000, 15000, 17500, 18500]
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+
+flags.DEFINE_integer('num_epochs', 20, 'Number of epochs to run trainer.')
+flags.DEFINE_integer('batch_size', 64, 'Batch size.')
+flags.DEFINE_string('train_dir', logdir, 'training dir')
+flags.DEFINE_integer('train_log', 10, 'How many steps to log training')
+flags.DEFINE_integer('test_log', 20, 'How many steps to log test error')
 
 g = tf.Graph()
 
 with g.as_default():
-    X = tf.placeholder(tf.float32, [None, height, width, channels], name="input")
-    Y = tf.placeholder(tf.float32, [None, noClasses], name="labels")
+    with tf.name_scope('input'):
+        with tf.device('/cpu:0'):
+            input_images = tf.constant(train_data, dtype=tf.float32)
+            input_labels = tf.constant(train_labels, dtype=tf.float32)
+
+            test_images = tf.constant(test_data, dtype=tf.float32)
+            test_labels = tf.constant(test_label, dtype=tf.float32)
+
+            image, label = tf.train.slice_input_producer(
+                [input_images, input_labels], num_epochs=FLAGS.num_epochs)
+            X, Y = tf.train.batch(
+                [image, label], batch_size=FLAGS.batch_size)
+
     FF = []
     net = X
 
-    for i, channel_no in enumerate([16, 32, 64, 128, 128]):
+    for i, channel_no in enumerate([16, 32]):
         with tf.name_scope("block_%d" % (i + 1)):
             net = FractalNet(net, 1, out_chanell=channel_no)
         FF.append(net)
@@ -29,6 +48,8 @@ with g.as_default():
         print(i, net.get_shape())
 
     net = tflearn.fully_connected(net, noClasses)
+    print(net.get_shape())
+    print(Y.get_shape)
     loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(net, Y))
 
     yp = tf.nn.softmax(net)
@@ -40,61 +61,68 @@ with g.as_default():
     reduce_lr = learning_rate.assign(tf.mul(learning_rate, 0.5))
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
-    learning_rate_summ = tf.scalar_summary("Learning rate", learning_rate)
-    train_acc_summ = tf.scalar_summary("Train accuracy", acc)
-    train_loss_summ = tf.scalar_summary("Train loss", loss)
-
-    train_summ = tf.merge_summary(
-        [learning_rate_summ, train_acc_summ, train_loss_summ],
+    train_summ = tf.merge_summary([
+        tf.scalar_summary("Learning rate", learning_rate),
+        tf.scalar_summary("Train accuracy", acc),
+        tf.scalar_summary("Train loss", loss),
+    ],
         name="Training_summary"
     )
 
-    test_acc_summ = tf.scalar_summary("Test accuracy", acc)
-    test_loss_summ = tf.scalar_summary("Test loss", loss)
-
-    test_summ = tf.merge_summary(
-        [test_acc_summ, test_loss_summ],
+    test_summ = tf.merge_summary([
+        tf.scalar_summary("Test accuracy", acc),
+        tf.scalar_summary("Test loss", loss),
+    ],
         name="Test_summary"
     )
 
-with tf.Session(graph=g) as sess:
+with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=1)) as sess:
     sess.run(tf.initialize_all_variables())
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
     merged = tf.merge_all_summaries()
     writer = tf.train.SummaryWriter(logdir, sess.graph)
-    step = 0
 
-    for epoh in range(400):
-        t = time.clock()
-        if epoh in reduce_learning:
-            sess.run(halve_lr)
-
-        tflearn.is_training(True)
-        batch_idxs = np.random.permutation(train_data.shape[0])
-        for batch in np.split(batch_idxs, train_data.shape[0] / batch_size):
+    t = time.clock()
+    try:
+        step = 0
+        while not coord.should_stop():
             step += 1
+            if step in reduce_learning:
+                sess.run(reduce_lr)
+
+            # Training on
+            tflearn.is_training(True)
             for F in FF[::2]:
                 sess.run(F.genLocalDropPath(0.15))
             for F in FF[1::2]:
                 sess.run(F.genRandomColumn())
-            summ, _ = sess.run([train_summ, train], feed_dict={
-                X: train_data[batch],
-                Y: train_labels[batch]
-            })
-            writer.add_summary(summ, step)
-            if step % test_log_steps == 0 or step == 1:
+
+            if step % FLAGS.train_log == 0 or step == 1:
+                summ, _ = sess.run([train_summ, train])
+                writer.add_summary(summ, step)
+            else:
+                sess.run(train)
+
+            if step % FLAGS.test_log == 0 or step == 1:
                 dt = time.clock() - t
 
-                tflearn.is_training(False)
-                for F in FF:
-                    sess.run(F.genTestMode())
-                summ, top1, avg_loss = sess.run([test_summ, acc, loss], feed_dict={
-                    X: test_data,
-                    Y: test_label
-                })
+                # Training off
+                # tflearn.is_training(False)
+                # for F in FF:
+                    # sess.run(F.genTestMode())
 
-                writer.add_summary(summ, step)
-                print("[{:10d}] step, acc: {:2.5f}%, loss: {:2.7f} steps/sec{:5.2f}"
-                    .format(step, 100 * top1, avg_loss, test_log_steps / dt))
+                print("[{:10d}] steps/sec{:5.2f}"
+                .format(step, FLAGS.test_log / dt))
 
                 t = time.clock()
+
+    except tf.errors.OutOfRangeError:
+      print('Saving')
+      saver.save(sess, FLAGS.train_dir, global_step=step)
+      print('Done training for %d epochs, %d steps.' % (FLAGS.num_epochs, step))
+    finally:
+        coord.request_stop()
+    coord.join(threads)
