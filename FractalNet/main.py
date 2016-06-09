@@ -34,8 +34,12 @@ with g.as_default():
 
             image, label = tf.train.slice_input_producer(
                 [input_images, input_labels], num_epochs=FLAGS.num_epochs)
-            X, Y = tf.train.batch(
+            X_batch, Y_batch = tf.train.batch(
                 [image, label], batch_size=FLAGS.batch_size)
+
+
+    X = tf.placeholder_with_default(X_batch, [None, 32, 32, 3])
+    Y = tf.placeholder_with_default(Y_batch, [None, 10])
 
     FF = []
     net = X
@@ -76,7 +80,7 @@ with g.as_default():
         name="Test_summary"
     )
 
-with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=1)) as sess:
+with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=4)) as sess:
     sess.run(tf.initialize_all_variables())
 
     coord = tf.train.Coordinator()
@@ -109,13 +113,18 @@ with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=1)) 
             if step % FLAGS.test_log == 0 or step == 1:
                 dt = time.clock() - t
 
-                # Training off
-                # tflearn.is_training(False)
-                # for F in FF:
-                    # sess.run(F.genTestMode())
+                tflearn.is_training(False)
+                for F in FF:
+                    sess.run(F.genTestMode())
 
-                print("[{:10d}] steps/sec{:5.2f}"
-                .format(step, FLAGS.test_log / dt))
+                summ, top1, avg_loss = sess.run([test_summ, acc, loss],             feed_dict={
+                    X: test_data,
+                    Y: test_label,
+                })
+
+                writer.add_summary(summ, step)
+                print("[{:10d}] acc: {:2.5f}%, loss: {:2.7f} steps/sec{:5.2f}"
+                    .format(step, 100 * top1, avg_loss, FLAGS.test_log / dt))
 
                 t = time.clock()
 
