@@ -99,10 +99,6 @@ with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=4)) 
 
             # Training on
             tflearn.is_training(True)
-            for F in FF[::2]:
-                sess.run(F.genLocalDropPath(0.15))
-            for F in FF[1::2]:
-                sess.run(F.genRandomColumn())
 
             if step % FLAGS.train_log == 0 or step == 1:
                 summ, _ = sess.run([train_summ, train])
@@ -114,9 +110,6 @@ with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=4)) 
                 dt = time.clock() - t
 
                 tflearn.is_training(False)
-                for F in FF:
-                    sess.run(F.genTestMode())
-
                 summ, top1, avg_loss = sess.run([test_summ, acc, loss],             feed_dict={
                     X: test_data,
                     Y: test_label,
