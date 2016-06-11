@@ -8,18 +8,16 @@ from loadData import *
 import tflearn
 from net import FractalNet
 
-batch_size = 50
 logdir = os.path.expanduser("~/logs/mini")
-reduce_learning = [10000, 15000, 17500, 18500]
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
-flags.DEFINE_integer('num_epochs', 20, 'Number of epochs to run trainer.')
+flags.DEFINE_integer('num_epochs', 200, 'Number of epochs to run trainer.')
 flags.DEFINE_integer('batch_size', 64, 'Batch size.')
 flags.DEFINE_string('train_dir', logdir, 'training dir')
 flags.DEFINE_integer('train_log', 10, 'How many steps to log training')
-flags.DEFINE_integer('test_log', 20, 'How many steps to log test error')
+flags.DEFINE_integer('test_log', 500, 'How many steps to log test error')
 
 g = tf.Graph()
 
@@ -44,9 +42,9 @@ with g.as_default():
     FF = []
     net = X
 
-    for i, channel_no in enumerate([16, 32]):
+    for i, channel_no in enumerate([32, 64, 128, 256, 512]):
         with tf.name_scope("block_%d" % (i + 1)):
-            net = FractalNet(2, net, channel_no, 2, 0.85)
+            net = FractalNet(2, net, channel_no, 2)
         FF.append(net)
         net = tf.nn.max_pool(net.get_tensor(), [1, 2, 2, 1], [1, 2, 2, 1], padding='SAME')
         print(i, net.get_shape())
@@ -62,7 +60,6 @@ with g.as_default():
     )
 
     learning_rate = tf.Variable(0.01, trainable=False)
-    reduce_lr = learning_rate.assign(tf.mul(learning_rate, 0.5))
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
     train_summ = tf.merge_summary([
@@ -94,8 +91,6 @@ with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=4)) 
         step = 0
         while not coord.should_stop():
             step += 1
-            if step in reduce_learning:
-                sess.run(reduce_lr)
 
             # Training on
             tflearn.is_training(True)
@@ -109,14 +104,15 @@ with tf.Session(graph=g, config=tf.ConfigProto(intra_op_parallelism_threads=4)) 
             if step % FLAGS.test_log == 0 or step == 1:
                 dt = time.clock() - t
 
+                perm = np.random.permutation(10000 - 1)[:1000]
                 tflearn.is_training(False)
                 summ, top1, avg_loss = sess.run([test_summ, acc, loss],             feed_dict={
-                    X: test_data,
-                    Y: test_label,
+                    X: test_data[perm],
+                    Y: test_label[perm],
                 })
 
                 writer.add_summary(summ, step)
-                print("[{:10d}] acc: {:2.5f}%, loss: {:2.7f} steps/sec{:5.2f}"
+                print("[{:10d}] acc: {:2.5f}%, loss: {:2.7f} steps/sec {:5.2f}"
                     .format(step, 100 * top1, avg_loss, FLAGS.test_log / dt))
 
                 t = time.clock()
