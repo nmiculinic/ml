@@ -46,7 +46,7 @@ with g.as_default():
 
     for i, channel_no in enumerate([16, 32]):
         with tf.name_scope("block_%d" % (i + 1)):
-            net = FractalNet(net, 1, out_chanell=channel_no)
+            net = FractalNet(2, net, channel_no, 2, 0.85)
         FF.append(net)
         net = tf.nn.max_pool(net.get_tensor(), [1, 2, 2, 1], [1, 2, 2, 1], padding='SAME')
         print(i, net.get_shape())
